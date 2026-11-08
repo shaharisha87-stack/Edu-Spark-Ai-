@@ -1,4 +1,101 @@
-app.py
-requirements.txt
-README.md
-packages.txt
+import json
+from datetime import datetime
+from pathlib import Path
+
+import pytesseract
+import streamlit as st
+from PIL import Image
+
+NOTES_FILE = Path("notes.json")
+
+
+def load_notes():
+    if not NOTES_FILE.exists():
+        return []
+    try:
+        return json.loads(NOTES_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def save_notes(notes):
+    NOTES_FILE.write_text(
+        json.dumps(notes, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+st.set_page_config(page_title="Edu Spark AI", page_icon="📝")
+st.title("📝 Edu Spark AI")
+st.write("Upload handwritten notes, review the extracted text, and save it.")
+
+notes = load_notes()
+
+st.subheader("Upload handwritten notes")
+uploaded_file = st.file_uploader(
+    "Choose a clear image of your notes",
+    type=["png", "jpg", "jpeg"],
+)
+
+if uploaded_file:
+    image = Image.open(uploaded_file).convert("RGB")
+    st.image(image, caption="Uploaded notes", use_container_width=True)
+
+    if st.button("Extract text"):
+        with st.spinner("Reading the image..."):
+            st.session_state["draft_text"] = pytesseract.image_to_string(
+                image,
+                lang="eng",
+            ).strip()
+
+if "draft_text" not in st.session_state:
+    st.session_state["draft_text"] = ""
+
+st.subheader("Create a note")
+with st.form("new_note"):
+    title = st.text_input("Title")
+    content = st.text_area(
+        "Review or edit your note",
+        value=st.session_state["draft_text"],
+        height=180,
+    )
+    submitted = st.form_submit_button("Save note")
+
+if submitted:
+    if title.strip() and content.strip():
+        notes.insert(
+            0,
+            {
+                "id": datetime.now().isoformat(),
+                "title": title.strip(),
+                "content": content.strip(),
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            },
+        )
+        save_notes(notes)
+        st.session_state["draft_text"] = ""
+        st.success("Note saved!")
+        st.rerun()
+    else:
+        st.warning("Please enter both a title and note.")
+
+st.divider()
+st.subheader("Your notes")
+
+search = st.text_input("Search notes")
+filtered_notes = [
+    note for note in notes
+    if search.casefold() in note["title"].casefold()
+    or search.casefold() in note["content"].casefold()
+]
+
+if not filtered_notes:
+    st.info("No notes found yet.")
+else:
+    for note in filtered_notes:
+        with st.expander(f"{note['title']} — {note['created_at']}"):
+            st.write(note["content"])
+            if st.button("Delete note", key=f"delete_{note['id']}"):
+                notes = [item for item in notes if item["id"] != note["id"]]
+                save_notes(notes)
+                st.rerun()
